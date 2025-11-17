@@ -118,7 +118,7 @@ ${postText}
         console.log(`Cron job: Повідомлення надіслано до чату ${chatId}`);
       }
     }
-    console.log('Cron job: Перевірку завершено.');
+    console.log('Cron job: Перевірку завершено.'); 
 
   } catch (error) {
     console.error('Cron job: Сталася помилка:', error.message);
