@@ -102,7 +102,7 @@ async function checkSheetAndSend() {
         const imageAuthor = escapeMarkdownV2(columns[imageAuthorIndex]);
         
         const message = `
-🔔 *Нагадування про публікацію на сьогодні (${escapeMarkdownV2(today)})* 🔔
+🔔 *Нагадування про публікацію на сьогодні \(${escapeMarkdownV2(today)}\)* 🔔
 
 *Дата:*
 ${publication}
