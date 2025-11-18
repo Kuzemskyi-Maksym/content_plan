@@ -1,13 +1,12 @@
 // --- api/cron.js ---
-// Цей файл виконує ТІЛЬКИ перевірку таблиці.
-// Vercel буде "смикати" його за розкладом.
+// Цей файл виконує тікі перевірку таблиці.
+// Vercel буде тикати його за розкладом.
 
 require('dotenv').config();
-require('dns').setDefaultResultOrder('ipv4first'); // Вирішує проблеми з IPv6
+require('dns').setDefaultResultOrder('ipv4first');
 const { Telegraf } = require('telegraf');
 const fetch = require('node-fetch');
 
-// --- Ініціалізація (потрібна тут, оскільки це окрема функція) ---
 if (!process.env.BOT_TOKEN) {
   console.error('ПОМИЛКА: BOT_TOKEN не вказано!');
   process.exit(1);
@@ -16,24 +15,26 @@ const bot = new Telegraf(process.env.BOT_TOKEN);
 const sheetUrl = process.env.SHEET_URL;
 const chatId = process.env.CHAT_ID;
 
-function escapeMarkdownV2(text) {
-  if (!text) return 'N/A';
-  return text.replace(/([_*\[\]()~`>#\+\-=|{}.!])/g, '\\$1');
+function escapeHTML(text) {
+  if (!text) return 'N/A'; 
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 
-// --- Твоя функція (майже без змін) ---
 async function checkSheetAndSend() {
   console.log('Запущено перевірку таблиці (CRON)...');
   
-  // Всі перевірки .env
   if (!chatId) {
     console.error('ПОМИЛКА: CHAT_ID не вказано. Зупиняю cron.');
     return;
   }
   if (!sheetUrl) {
     console.error('ПОМИЛКА: SHEET_URL не вказано. Зупиняю cron.');
-    // Намагаємося повідомити про помилку, якщо можемо
     try {
       await bot.telegram.sendMessage(chatId, 'Помилка cron: SHEET_URL не вказано.');
     } catch (e) {
@@ -43,7 +44,7 @@ async function checkSheetAndSend() {
   }
 
   try {
-    // 1. Отримуємо сьогоднішню дату
+    // Отримуємо сьогоднішню дату
     const today = new Date().toLocaleDateString('uk-UA', {
       timeZone: 'Europe/Kyiv',
       day: '2-digit',
@@ -52,26 +53,26 @@ async function checkSheetAndSend() {
     });
     console.log(`Cron job: Сьогоднішня дата (Київ): ${today}`);
 
-    // 2. Завантажуємо CSV-файл
+    // Завантажуєм CSV-файл
     const response = await fetch(sheetUrl);
     if (!response.ok) {
       throw new Error(`Не вдалося завантажити таблицю: ${response.statusText}`);
     }
     const csvData = await response.text();
 
-    // 3. Парсимо CSV
+    // Парсимо CSV
     const rows = csvData.trim().split(/\r?\n/);
     if (rows.length < 2) {
       throw new Error('Таблиця порожня або містить лише заголовки.');
     }
 
     let headers = rows[0].split(',').map(h => h.trim());
-    // Очищуємо BOM-символ з першого заголовка
+    // Очищуємо BOM-символ
     if (headers[0] && headers[0].charCodeAt(0) === 0xFEFF) {
       headers[0] = headers[0].substring(1);
     }
 
-    // 4. Знаходимо індекси
+    // Знаходимо індекси
     const dateIndex = headers.indexOf('Публікація');
     const pubIndex = headers.indexOf('Публікація');
     const postIndex = headers.indexOf('Допис');
@@ -83,10 +84,9 @@ async function checkSheetAndSend() {
       throw new Error('Не можу знайти стовпець "Публікація". Перевір назву у таблиці.');
     }
 
-    // 5. Пошук збігів
+    // Пошук збігів
     for (let i = 1; i < rows.length; i++) {
       const columns = rows[i].split(',').map(c => c.trim());
-      // Перевірка, що стовпець дати існує (уникаємо помилок на порожніх рядках)
       if (columns.length <= dateIndex) {
         continue;
       }
@@ -95,24 +95,26 @@ async function checkSheetAndSend() {
       if (postDate === today) {
         console.log(`Cron job: Знайдено збіг! Дата: ${postDate}`);
         
-        const publication = escapeMarkdownV2(columns[pubIndex]);
-        const postText = escapeMarkdownV2(columns[postIndex]);
-        const textAuthor = escapeMarkdownV2(columns[textAuthorIndex]);
-        const imageAuthor = escapeMarkdownV2(columns[imageAuthorIndex]);
+        const publication = escapeHTML(columns[pubIndex]);
+        const postText = escapeHTML(columns[postIndex]);
+        const textAuthor = escapeHTML(columns[textAuthorIndex]);
+        const imageAuthor = escapeHTML(columns[imageAuthorIndex]);
         
+        // <b> замість * та не екрануємо дужки ()
         const message = `
-🔔 *Нагадування про публікацію на сьогодні \(${escapeMarkdownV2(today)}\)* 🔔
+🔔 <b>Нагадування про публікацію на сьогодні (${escapeHTML(today)})</b> 🔔
 
-*Дата:*
+<b>Дата:</b>
 ${publication}
 
-*Допис:*
+<b>Допис:</b>
 ${postText}
 
-*Виконавець (Текст):* ${textAuthor}
-*Виконавець (Картинка):* ${imageAuthor}
+<b>Виконавець (Текст):</b> ${textAuthor}
+<b>Виконавець (Картинка):</b> ${imageAuthor}
         `;
-        await bot.telegram.sendMessage(chatId, message, { parse_mode: 'MarkdownV2' });
+
+        await bot.telegram.sendMessage(chatId, message, { parse_mode: 'HTML' });
         console.log(`Cron job: Повідомлення надіслано до чату ${chatId}`);
       }
     }
@@ -121,8 +123,6 @@ ${postText}
   } catch (error) {
     console.error('Cron job: Сталася помилка:', error.message);
     try {
-      // надіслати помилку в Telegram
-      // Прибираємо форматування з повідомлення про помилку, щоб воно гарантовано надіслалось
       await bot.telegram.sendMessage(chatId, `Помилка Cron: ${error.message}`);
     } catch (e) {
       console.error('Cron job: Не вдалося надіслати повідомлення про помилку', e);
