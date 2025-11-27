@@ -9,6 +9,7 @@ const debug = createDebug('bot:cron');
 export const remindPublications = async (
   telegram: Telegram,
   chatId: number,
+  messageThreadId?: number,
 ) => {
   debug('Cron job to remind publicatoins started');
 
@@ -56,7 +57,10 @@ export const remindPublications = async (
       message += fields.join('\n') + '\n\n';
     }
 
-    await telegram.sendMessage(chatId, message.trim(), { parse_mode: 'HTML' });
+    await telegram.sendMessage(chatId, message.trim(), {
+      parse_mode: 'HTML',
+      message_thread_id: messageThreadId,
+    });
 
     debug('Reminders was sent');
   } catch (error) {
