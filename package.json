@@ -4,11 +4,13 @@
   "description": "Content Plan Bot",
   "main": "src/index.ts",
   "scripts": {
+    "start:dev": "DEBUG=bot* dotenv -- nodemon -e ts -x ts-node src/core/development.ts",
     "dev": "DEBUG=bot* dotenv -- nodemon -e ts -x ts-node src/index.ts",
     "devWindows": "@powershell -Command $env:DEBUG='bot*';dotenv -- -- nodemon -e ts -x ts-node src/index.ts",
     "build": "ncc build src/index.ts -o public -m",
     "prettier": "prettier --write src/**/*.ts",
-    "lint": "tsc --noemit"
+    "lint": "tsc --noemit",
+    "runcron": "ts-node src/test/test_cron.ts"
   },
   "dependencies": {
     "@vercel/node": "^3.2.12",
@@ -19,7 +21,7 @@
   "devDependencies": {
     "@types/debug": "^4.1.12",
     "@types/node": "^22.5.4",
-    "@types/papaparse": "^5.5.0",
+    "@types/papaparse": "^5.3.14",
     "@vercel/ncc": "^0.38.1",
     "debug": "^4.3.7",
     "nodemon": "^3.1.11",
