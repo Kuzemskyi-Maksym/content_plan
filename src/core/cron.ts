@@ -13,6 +13,7 @@ const EXECUTOR_TAGS: Record<string, string> = {
 
 const GLOBAL_TAGS = ['@a_hunko', '@javelis'];
 
+
 const getTelegramTag = (name: string): string => {
   if (!name) return '';
   const cleanName = name.trim();
@@ -79,20 +80,27 @@ export const remindPublications = async (
         continue;
       }
 
-      const textAuthorName = row['Виконавець тексту'] || '';
-      const imageAuthorName = row['Виконавець картинки'] || '';
+      const textAuthorName = row['Виконавець тексту']?.trim() || '';
+      const imageAuthorName = row['Виконавець картинки']?.trim() || '';
 
       const textAuthorTag = getTelegramTag(textAuthorName);
       const imageAuthorTag = getTelegramTag(imageAuthorName);
 
       const primaryTags = [textAuthorTag, imageAuthorTag].filter(tag => tag);
-
       const allTagsSet = new Set([...primaryTags, ...GLOBAL_TAGS]);
-
       const allTags = Array.from(allTagsSet).join(' ');
 
       const postText = escapeHtml(row['Допис'] || '');
       const platform = escapeHtml(row['Платформа'] || 'N/A');
+
+
+      const textAuthorBlock = textAuthorName
+        ? `<b>Виконавець тексту:</b> ${escapeHtml(textAuthorName)}`
+        : `<b>Виконавець тексту:</b> Відсутній`;
+
+      const imageAuthorBlock = imageAuthorName
+        ? `<b>Виконавець картинки:</b> ${escapeHtml(imageAuthorName)}`
+        : `<b>Виконавець картинки:</b> Відсутній`;
 
       const message = `
 ${allTags}
@@ -103,9 +111,10 @@ ${reminderText} (Дедлайн: ${postDate}) 🔔
 <b>Допис:</b>
 ${postText.substring(0, 500)}${row['Допис'] && row['Допис'].length > 500 ? '...' : ''}
 
-<b>Виконавець тексту:</b> ${escapeHtml(textAuthorName)}
-<b>Виконавець картинки:</b> ${escapeHtml(imageAuthorName)}
+${textAuthorBlock}
+${imageAuthorBlock}
       `;
+
 
       await telegram.sendMessage(chatId, message.trim(), {
         parse_mode: 'HTML',
