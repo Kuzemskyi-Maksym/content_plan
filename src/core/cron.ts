@@ -9,19 +9,27 @@ const debug = createDebug('bot:cron');
 const EXECUTOR_TAGS: Record<string, string> = {
   'Настя': '@a_hunko',
   'Соня': '@javelis',
+  'Нікіта': '@Nikita_vdn',
+  'Publicsa': '@publicsa',
+  'if_found': '@if_found',
+  'nonGratis': '@nonGratis',
 };
 
 const GLOBAL_TAGS = ['@a_hunko', '@javelis'];
 
+
 const getTelegramTag = (name: string): string => {
   if (!name) return '';
   const cleanName = name.trim();
+
   if (EXECUTOR_TAGS[cleanName]) {
     return EXECUTOR_TAGS[cleanName];
   }
+
   if (cleanName.startsWith('@')) {
     return cleanName;
   }
+
   return '';
 };
 
@@ -76,32 +84,35 @@ export const remindPublications = async (
 
       const textAuthorName = row['Виконавець тексту']?.trim() || '';
       const imageAuthorName = row['Виконавець картинки']?.trim() || '';
-      const textAuthorTag = getTelegramTag(textAuthorName);
-      const imageAuthorTag = getTelegramTag(imageAuthorName);
 
-      if (textAuthorTag) allTagsSet.add(textAuthorTag);
-      if (imageAuthorTag) allTagsSet.add(imageAuthorTag);
+      const extractTags = (name: string): string[] => {
+        return name.split(/\s+/).map(tag => getTelegramTag(tag)).filter(t => t.length > 0);
+      }
+
+      const textTags = extractTags(textAuthorName);
+      const imageTags = extractTags(imageAuthorName);
+
+      textTags.forEach(tag => allTagsSet.add(tag));
+      imageTags.forEach(tag => allTagsSet.add(tag));
 
       // Формування блоків
       const postText = escapeHtml(row['Допис'] || '');
       const platform = escapeHtml(row['Платформа'] || 'N/A');
 
-      const textAuthorBlock = textAuthorName
-        ? `<b>Виконавець тексту:</b> ${escapeHtml(textAuthorName)}`
-        : `<b>Виконавець тексту:</b> Відсутній`;
+      const textAuthorBlock = `<b>Виконавець тексту:</b> ${textAuthorName ? escapeHtml(textAuthorName) : 'Відсутній'}`;
 
       const imageAuthorBlock = imageAuthorName
         ? `<b>Виконавець картинки:</b> ${escapeHtml(imageAuthorName)}`
-        : `<b>Виконавець картинки:</b> Відсутній`;
+        : null;
 
-      const postBlock = `
-<b>Платформа:</b> ${platform}
-<b>Допис:</b>
-${postText.substring(0, 500)}${row['Допис'] && row['Допис'].length > 500 ? '...' : ''}
+      const postDetails = [
+        `<b>Платформа:</b> ${platform}`,
+        `<b>Допис:</b> ${postText.substring(0, 500)}${row['Допис'] && row['Допис'].length > 500 ? '...' : ''}`,
+        textAuthorBlock,
+        imageAuthorBlock,
+      ].filter(Boolean).join('\n');
 
-${textAuthorBlock}
-${imageAuthorBlock}
-      `;
+      const postBlock = `\n${postDetails}\n`;
 
       if (postDate === today || postDate === oneDayFromNow) {
         isUrgentFound = true;
@@ -123,16 +134,18 @@ ${allTags.trim()}
     let finalMessage = header;
 
     const appendGroup = (date: string, title: string, icon: string) => {
+      const finalIcon = title === 'СЬОГОДНІ' ? '🟥' : icon;
+
       if (groupedMessages[date].length > 0) {
-        finalMessage += `\n\n———————————————————\n\n`; // Роздільник
-        finalMessage += `${icon} <b>${title}</b> (Дедлайн: ${date})\n\n`;
-        finalMessage += groupedMessages[date].join('\n\n'); // Пости всередині групи
+        finalMessage += `\n———————————————————\n`;
+        finalMessage += `${finalIcon} <b>${title}</b> (Дедлайн: ${date})\n\n`;
+        finalMessage += groupedMessages[date].map(p => p.trim()).join('\n\n');
       }
     };
 
-    appendGroup(today, 'СЬОГОДНІ', '🔔');
-    appendGroup(oneDayFromNow, 'ЗАВТРА', '⚠️');
-    appendGroup(threeDaysFromNow, 'ЧЕРЕЗ 3 ДНІ', '❕');
+    appendGroup(today, 'СЬОГОДНІ', '🟥');
+    appendGroup(oneDayFromNow, 'ЗАВТРА', '🟨');
+    appendGroup(threeDaysFromNow, 'ЧЕРЕЗ 3 ДНІ', '🟦');
 
     await telegram.sendMessage(chatId, finalMessage.trim(), {
       parse_mode: 'HTML',

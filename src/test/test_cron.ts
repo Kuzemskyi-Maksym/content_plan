@@ -13,7 +13,7 @@ const runTestCron = async () => {
   const bot = new Telegraf(BOT_TOKEN);
 
   try {
-    await remindPublications(bot.telegram, CHAT_ID, MESSAGE_THREAD_ID);
+    await remindPublications(bot.telegram, CHAT_ID);
 
     console.log('--- Тестування завершено: Успіх ---');
     console.log('Перевірте повідомлення у Telegram чаті.');
