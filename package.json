@@ -5,7 +5,7 @@
   "main": "src/index.ts",
   "scripts": {
     "start:dev": "DEBUG=bot* dotenv -- nodemon -e ts -x ts-node src/core/development.ts",
-    "dev": "DEBUG=bot* dotenv -- nodemon -e ts -x ts-node src/index.ts",
+    "dev": "cross-env DEBUG=bot* dotenv -- nodemon -e ts -x ts-node src/index.ts",
     "devWindows": "@powershell -Command $env:DEBUG='bot*';dotenv -- -- nodemon -e ts -x ts-node src/index.ts",
     "build": "ncc build src/index.ts -o public -m",
     "prettier": "prettier --write src/**/*.ts",
@@ -23,6 +23,7 @@
     "@types/node": "^22.5.4",
     "@types/papaparse": "^5.3.14",
     "@vercel/ncc": "^0.38.1",
+    "cross-env": "^10.1.0",
     "debug": "^4.3.7",
     "nodemon": "^3.1.11",
     "prettier": "^3.3.3",

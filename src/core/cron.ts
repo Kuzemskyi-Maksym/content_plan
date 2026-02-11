@@ -1,161 +1,243 @@
 import createDebug from 'debug';
 import Papa from 'papaparse';
 import { SHEET_URL } from '../config';
-import { escapeHtml, getCurrentDate, getDateFromNow } from '../utils';
+import { getCurrentDate, getDateFromNow } from '../utils';
 import type { Telegram } from 'telegraf';
 
 const debug = createDebug('bot:cron');
 
+const TELEGRAM_LIMIT = 4096;
+const MAX_OVERDUE_DAYS = 14;
+
 const EXECUTOR_TAGS: Record<string, string> = {
   'Настя': '@a_hunko',
-  'Соня': '@javelis',
+  'Артем': '@artemiisychov',
   'Нікіта': '@Nikita_vdn',
   'Publicsa': '@publicsa',
   'if_found': '@if_found',
   'nonGratis': '@nonGratis',
 };
 
-const GLOBAL_TAGS = ['@a_hunko', '@javelis'];
-
+const GLOBAL_TAGS = ['@a_hunko', '@artemiisychov'];
 
 const getTelegramTag = (name: string): string => {
   if (!name) return '';
-  const cleanName = name.trim();
-
-  if (EXECUTOR_TAGS[cleanName]) {
-    return EXECUTOR_TAGS[cleanName];
-  }
-
-  if (cleanName.startsWith('@')) {
-    return cleanName;
-  }
-
+  const clean = name.trim();
+  if (EXECUTOR_TAGS[clean]) return EXECUTOR_TAGS[clean];
+  if (clean.startsWith('@')) return clean;
   return '';
 };
 
+const isCompletedStatus = (status?: string) => {
+  const s = status?.trim().toLowerCase();
+  return (
+    s === 'опубліковано' ||
+    s === 'заплановано' ||
+    s === 'заблоковано'
+  );
+};
+
+const parseDate = (dateStr?: string): Date | null => {
+  if (!dateStr) return null;
+  const parts = dateStr.split('.');
+  if (parts.length !== 3) return null;
+
+  const [day, month, year] = parts.map(Number);
+  if (!day || !month || !year) return null;
+
+  return new Date(year, month - 1, day);
+};
+
+const diffInDays = (a: Date, b: Date) => {
+  const ms = a.getTime() - b.getTime();
+  return Math.floor(ms / (1000 * 60 * 60 * 24));
+};
+
+const parseTimeToMinutes = (time?: string): number => {
+  if (!time) return 9999;
+  const parts = time.split(':');
+  if (parts.length !== 2) return 9999;
+
+  const [h, m] = parts.map(Number);
+  if (isNaN(h) || isNaN(m)) return 9999;
+
+  return h * 60 + m;
+};
 
 export const remindPublications = async (
   telegram: Telegram,
   chatId: number,
   messageThreadId?: number,
 ) => {
-  debug('Cron job to remind publications started');
+  debug('Cron job started');
 
   try {
-    const today = getCurrentDate();
-    const oneDayFromNow = getDateFromNow(1);
-    const threeDaysFromNow = getDateFromNow(3);
+    const todayStr = getCurrentDate();
+    const tomorrowStr = getDateFromNow(1);
+    const threeDaysStr = getDateFromNow(3);
+
+    const todayDate = parseDate(todayStr);
+    if (!todayDate) throw new Error('Помилка парсингу сьогоднішньої дати');
 
     const response = await fetch(SHEET_URL);
-    if (!response.ok) throw new Error(`Помилка завантаження: ${response.statusText}`);
+    if (!response.ok) {
+      throw new Error(`Помилка завантаження: ${response.statusText}`);
+    }
 
     const csvData = await response.text();
-    const parsed = Papa.parse(csvData, { header: true, skipEmptyLines: true });
+    const parsed = Papa.parse(csvData, {
+      header: true,
+      skipEmptyLines: true,
+    });
 
     if (parsed.errors.length) {
-      console.error('CSV parsing errors:', parsed.errors);
+      console.error(parsed.errors);
       throw new Error('Помилка парсингу CSV');
     }
 
     const rows = parsed.data as Record<string, string>[];
 
-    const relevantRows = rows.filter((row) => {
-      const date = row['Публікація'];
-      return date === today || date === oneDayFromNow || date === threeDaysFromNow;
-    });
+    const grouped = {
+      overdue: [] as { text: string; timeOrder: number }[],
+      today: [] as { text: string; timeOrder: number }[],
+      tomorrow: [] as { text: string; timeOrder: number }[],
+      threeDays: [] as { text: string; timeOrder: number }[],
+    };
 
-    if (!relevantRows.length) {
+    const tags = new Set<string>([...GLOBAL_TAGS]);
+    let isUrgent = false;
+
+    for (const row of rows) {
+      const postDateStr = row['Публікація']?.trim();
+      if (!postDateStr) continue;
+
+      const postDate = parseDate(postDateStr);
+      if (!postDate) continue;
+
+      const status = row['Статус'];
+      const daysDiff = diffInDays(todayDate, postDate);
+
+      const isToday = postDateStr === todayStr;
+      const isTomorrow = postDateStr === tomorrowStr;
+      const isThreeDays = postDateStr === threeDaysStr;
+
+      const isOverdue =
+        daysDiff > 0 &&
+        daysDiff <= MAX_OVERDUE_DAYS &&
+        !isCompletedStatus(status);
+
+      if (!isToday && !isTomorrow && !isThreeDays && !isOverdue) {
+        continue;
+      }
+
+      const textAuthor = row['Виконавець тексту']?.trim() || 'Відсутній';
+      const imageAuthor = row['Виконавець картинки']?.trim() || '';
+      const platform = row['Платформа'] || 'N/A';
+      const postText = (row['Допис'] || '').substring(0, 500);
+      const time = row['Час']?.trim();
+
+      const collectTags = (name: string) => {
+        name
+          .split(/\s+/)
+          .map(n => getTelegramTag(n))
+          .filter(Boolean)
+          .forEach(tag => tags.add(tag));
+      };
+
+      collectTags(textAuthor);
+      collectTags(imageAuthor);
+
+      let block = '';
+
+      if (time) {
+        block += `🕒 ${time}\n`;
+      }
+
+      block +=
+        `Платформа: ${platform}
+Допис: ${postText}
+Виконавець тексту: ${textAuthor}`;
+
+      if (imageAuthor) {
+        block += `\nВиконавець картинки: ${imageAuthor}`;
+      }
+
+      if (isOverdue) {
+        block += `\nСтатус: ${status || 'Невідомо'}`;
+        block += `\nПрострочено на ${daysDiff} дн.`;
+      }
+
+      const timeOrder = parseTimeToMinutes(time);
+
+      if (isOverdue) {
+        grouped.overdue.push({ text: block, timeOrder });
+        isUrgent = true;
+      } else if (isToday) {
+        grouped.today.push({ text: block, timeOrder });
+        isUrgent = true;
+      } else if (isTomorrow) {
+        grouped.tomorrow.push({ text: block, timeOrder });
+        isUrgent = true;
+      } else if (isThreeDays) {
+        grouped.threeDays.push({ text: block, timeOrder });
+      }
+    }
+
+    // сортуємо по часу
+    const sortByTime = (arr: { text: string; timeOrder: number }[]) =>
+      arr.sort((a, b) => a.timeOrder - b.timeOrder);
+
+    sortByTime(grouped.today);
+    sortByTime(grouped.tomorrow);
+    sortByTime(grouped.threeDays);
+    sortByTime(grouped.overdue);
+
+    const total =
+      grouped.overdue.length +
+      grouped.today.length +
+      grouped.tomorrow.length +
+      grouped.threeDays.length;
+
+    if (!total) {
       debug('No relevant posts found');
       return;
     }
 
+    let message = `
+${Array.from(tags).join(' ')}
 
-    const groupedMessages = {
-      [today]: [] as string[],
-      [oneDayFromNow]: [] as string[],
-      [threeDaysFromNow]: [] as string[],
-    };
-
-    const allTagsSet = new Set<string>([...GLOBAL_TAGS]);
-    let isUrgentFound = false;
-
-    for (const row of relevantRows) {
-      const postDate = row['Публікація'];
-
-      const textAuthorName = row['Виконавець тексту']?.trim() || '';
-      const imageAuthorName = row['Виконавець картинки']?.trim() || '';
-
-      const extractTags = (name: string): string[] => {
-        return name.split(/\s+/).map(tag => getTelegramTag(tag)).filter(t => t.length > 0);
-      }
-
-      const textTags = extractTags(textAuthorName);
-      const imageTags = extractTags(imageAuthorName);
-
-      textTags.forEach(tag => allTagsSet.add(tag));
-      imageTags.forEach(tag => allTagsSet.add(tag));
-
-      // Формування блоків
-      const postText = escapeHtml(row['Допис'] || '');
-      const platform = escapeHtml(row['Платформа'] || 'N/A');
-
-      const textAuthorBlock = `<b>Виконавець тексту:</b> ${textAuthorName ? escapeHtml(textAuthorName) : 'Відсутній'}`;
-
-      const imageAuthorBlock = imageAuthorName
-        ? `<b>Виконавець картинки:</b> ${escapeHtml(imageAuthorName)}`
-        : null;
-
-      const postDetails = [
-        `<b>Платформа:</b> ${platform}`,
-        `<b>Допис:</b> ${postText.substring(0, 500)}${row['Допис'] && row['Допис'].length > 500 ? '...' : ''}`,
-        textAuthorBlock,
-        imageAuthorBlock,
-      ].filter(Boolean).join('\n');
-
-      const postBlock = `\n${postDetails}\n`;
-
-      if (postDate === today || postDate === oneDayFromNow) {
-        isUrgentFound = true;
-        groupedMessages[postDate].push(postBlock);
-      } else if (postDate === threeDaysFromNow) {
-        groupedMessages[postDate].push(postBlock);
-      }
-    }
-
-    const allTags = Array.from(allTagsSet).join(' ');
-
-    const header = `
-${allTags.trim()}
-
-<b>ЗВЕДЕННЯ КОНТЕНТ-ПЛАНУ НА ${escapeHtml(getCurrentDate())}</b>
-Знайдено ${relevantRows.length} актуальних постів.
+ЗВЕДЕННЯ КОНТЕНТ-ПЛАНУ НА ${todayStr}
+Знайдено ${total} постів.
 `;
 
-    let finalMessage = header;
-
-    const appendGroup = (date: string, title: string, icon: string) => {
-      const finalIcon = title === 'СЬОГОДНІ' ? '🟥' : icon;
-
-      if (groupedMessages[date].length > 0) {
-        finalMessage += `\n———————————————————\n`;
-        finalMessage += `${finalIcon} <b>${title}</b> (Дедлайн: ${date})\n\n`;
-        finalMessage += groupedMessages[date].map(p => p.trim()).join('\n\n');
+    const appendSection = (
+      title: string,
+      data: { text: string }[],
+      icon: string,
+    ) => {
+      if (data.length > 0) {
+        message += `\n-----------------------------------\n`;
+        message += `${icon} ${title}\n\n`;
+        message += data.map(d => d.text).join('\n\n');
       }
     };
 
-    appendGroup(today, 'СЬОГОДНІ', '🟥');
-    appendGroup(oneDayFromNow, 'ЗАВТРА', '🟨');
-    appendGroup(threeDaysFromNow, 'ЧЕРЕЗ 3 ДНІ', '🟦');
+    appendSection('ПРОСТРОЧЕНІ (до 14 днів)', grouped.overdue, '🚨');
+    appendSection('СЬОГОДНІ', grouped.today, '🟥');
+    appendSection('ЗАВТРА', grouped.tomorrow, '🟨');
+    appendSection('ЧЕРЕЗ 3 ДНІ', grouped.threeDays, '🟦');
 
-    await telegram.sendMessage(chatId, finalMessage.trim(), {
-      parse_mode: 'HTML',
-      message_thread_id: messageThreadId,
-      disable_notification: !isUrgentFound
-    });
+    const text = message.trim();
 
-    debug('Reminders were sent in one consolidated message');
+    for (let i = 0; i < text.length; i += TELEGRAM_LIMIT) {
+      await telegram.sendMessage(chatId, text.slice(i, i + TELEGRAM_LIMIT), {
+        message_thread_id: messageThreadId,
+        disable_notification: !isUrgent,
+      });
+    }
+
+    debug('Message sent successfully');
   } catch (error) {
-    debug('Error running cron job');
     console.error(error);
     try {
       await telegram.sendMessage(chatId, `Помилка Cron: ${error}`);
