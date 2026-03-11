@@ -18,7 +18,7 @@ const EXECUTOR_TAGS: Record<string, string> = {
   'nonGratis': '@nonGratis',
 };
 
-const GLOBAL_TAGS = ['@a_hunko', '@artemiisychov'];
+const GLOBAL_TAGS = ['@artemiisychov',];
 
 const getTelegramTag = (name: string): string => {
   if (!name) return '';
